@@ -1,62 +1,71 @@
-get_cycles <- function(nodes, edgelist, max_cycle_size){
-  cycle_list <- list() 
-  cycles <- 0 
-  incidence <- function(from,to){
-    return(edgelist %>% filter(X1==from, X2==to) %>% nrow > 0)
-  }
-  get_child <- function(from, current, visited){
-    
-    if (from != nodes){
-      for (j in (from + 1):nodes){
-        if (incidence(current,j) & !visited[j]){
-          return(j)
-        }
-      }
-    }
-    
-    return(-1)
-  }
-  node_stack <- numeric()
-  current_head_node <- 1
-  visited <- rep(FALSE, nodes)
-  while (current_head_node <= nodes){
-    node_stack <- c(node_stack, current_head_node)
-    visited[current_head_node] <- TRUE 
-    v <- get_child(current_head_node, current_head_node, visited)
-    
-    while(length(node_stack) > 0){
-      if (v == -1){
-        backtrack_node <- node_stack %>% tail(1)
-        node_stack <- node_stack %>% head(-1)
-        
-        if (backtrack_node == current_head_node){
-          visited[backtrack_node] <- FALSE
-          break
-        }
-        visited[backtrack_node] <- FALSE
-        new_top_node <- node_stack %>% tail(1)
-        v <- get_child(backtrack_node, new_top_node, visited)
-        
-        
-      } else {
-        node_stack <- c(node_stack, v)
-        visited[v] <- TRUE
-        if (incidence(v,current_head_node)){
-          if (length(node_stack) <= max_cycle_size){
-            cycles <- cycles + 1
-            cycle_list[[cycles]] <- node_stack
+## ---------------------------------------------
+## Fast cycle enumeration (K <= 3)
+## ---------------------------------------------
+
+get_cycles <- function(nodes, edgelist, max_cycle_size = 3) {
+  # expects edgelist columns X1, X2 (1-based ints), no self-loops
+  stopifnot(all(c("X1", "X2") %in% names(edgelist)))
+  i <- as.integer(edgelist$X1)
+  j <- as.integer(edgelist$X2)
+  keep <- i != j
+  i <- i[keep]; j <- j[keep]
+
+  # Sparse boolean adjacency for O(1) membership tests
+  A <- Matrix::sparseMatrix(i = i, j = j, dims = c(nodes, nodes), x = TRUE)
+
+  # Out-neighbor list; ensure every node has a vector (possibly length 0)
+  out <- split(j, factor(i, levels = seq_len(nodes)))
+  out <- lapply(out, function(v) if (length(v)) as.integer(v) else integer(0L))
+
+  cycles <- vector("list", 64L)
+  cidx <- 0L
+
+  # Enumerate with node i as the minimum label in the cycle to avoid duplicates
+  for (i_node in seq_len(nodes)) {
+
+    # ----- 2-cycles (i < j) -----
+    if (max_cycle_size >= 2L) {
+      nbrs <- out[[i_node]]
+      if (length(nbrs)) {
+        cand <- nbrs[nbrs > i_node]
+        if (length(cand)) {
+          recip <- cand[ A[cand, i_node] ]
+          nrec <- length(recip)
+          if (nrec) {
+            if (cidx + nrec > length(cycles)) length(cycles) <- max(2L * length(cycles), cidx + nrec)
+            for (jj in recip) { cidx <- cidx + 1L; cycles[[cidx]] <- c(i_node, jj) }
           }
-          
-        }
-        
-        if (length(node_stack) >= max_cycle_size){
-          v <- -1
-        } else {
-          v <- get_child(current_head_node, v, visited)
         }
       }
     }
-    current_head_node <- current_head_node + 1
+
+    # ----- 3-cycles (i < k to keep i minimal in {i,j,k}) -----
+    if (max_cycle_size >= 3L) {
+      nbrs1 <- out[[i_node]]
+      if (length(nbrs1)) {
+        for (j_node in nbrs1) {
+          nbrs2 <- out[[j_node]]
+          if (!length(nbrs2)) next
+
+          # enforce i_node as smallest label in the 3-cycle
+          ks <- nbrs2[nbrs2 > i_node & nbrs2 != j_node]
+          if (!length(ks)) next
+
+          # close the cycle with k -> i
+          closek <- ks[ A[ks, i_node] ]
+          nclose <- length(closek)
+          if (nclose) {
+            if (cidx + nclose > length(cycles)) length(cycles) <- max(2L * length(cycles), cidx + nclose)
+            for (k_node in closek) {
+              cidx <- cidx + 1L
+              cycles[[cidx]] <- c(i_node, j_node, k_node)
+            }
+          }
+        }
+      }
+    }
   }
-  return(cycle_list)
+
+  if (cidx == 0L) return(list())
+  cycles[seq_len(cidx)]
 }

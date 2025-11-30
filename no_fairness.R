@@ -1,7 +1,6 @@
 no_fairness <- function(X, wt){
   require(gurobi)
-  M <- dim(X)[1]
-  N <- dim(X)[2]
+  M <- nrow(X); N <- ncol(X)
   model <- list()
   model$obj        <- wt
   model$modelsense <- 'max'
@@ -9,6 +8,6 @@ no_fairness <- function(X, wt){
   model$rhs        <- rep(1, N)
   model$sense      <- rep('<=', N)
   model$vtype      <- 'B'
-  result <- gurobi(model)
+  result <- gurobi(model, params = list(OutputFlag = 0))
   return(as.numeric(result$x > 0.99))
 }
